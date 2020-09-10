@@ -1,9 +1,18 @@
+'''
+@author: Michael Adams
+@contributor: Nick Flamini
+@use: This software is free to be used by anyone. No permission is needed.
+@copyright: The author owns all copyrightto the below code. Contributors may request permission to make additions and changes the source code.
+'''
+
 from netmiko import ConnectHandler
 from time import time
 from time import sleep
 import datetime
 from multiprocessing.dummy import Pool as ThreadPool
 import threading
+from pathlib import Path
+import json
 
 class Switch_Driver:
     
@@ -30,12 +39,14 @@ class Switch_Driver:
     '''
     Send custom command to the device.
     @args command: str command that needs to be run.
+    @return: str
     '''
     def run_command(self, command):
-        output = self.net_connect.send_command_timing(command)
+        output = self.net_connect.send_command_timing(command, use_textfsm=False)
         return output
     '''
     Disconnect from the network device
+    @return: str
     ''' 
     def disconnect(self):
         self.net_connect.disconnect()
@@ -43,15 +54,20 @@ class Switch_Driver:
 
     '''
     Save running-config to local storage
+    @return: str
     '''
     def save(self):
-        output = self.net_connect.send_command_timing('copy run start')
-        return output
+        self.net_connect.send_command_timing('copy run start')
+        self.net_connect.send_command_timing('') # Confirm
+        self.net_connect.send_command_expect('', expect_string = r'\#') # Confirm again
+
+        return self.host + 'has saved locally'
 
     '''
     Save running-config to atconfig
     @args username: username used to log into atconfig
     @args password: password associated with username
+    @return: str
     '''
     def backup(self, username, password):
         scp_username = username
@@ -61,10 +77,6 @@ class Switch_Driver:
                 if self.device_os == 'ios':
                     ### Turn off paging so no spacebar is needed
                     self.net_connect.send_command('terminal length 0')
-                    ### Save locally
-                    self.net_connect.send_command_timing('copy run start')
-                    self.net_connect.send_command_timing('') # Confirm
-                    self.net_connect.send_command_expect('', expect_string = r'\#') # Confirm again
                     ### Save to atconfig
                     self.net_connect.send_command_timing('copy run scp:')
                     self.net_connect.send_command_timing('10.40.201.21')
@@ -79,9 +91,6 @@ class Switch_Driver:
                 elif self.device_os == 'dell':
                     ### Turn off paging so no spacebar is needed
                     self.net_connect.send_command('terminal length 0')
-                    ### Save locally
-                    self.net_connect.send_command_timing('copy run start')
-                    self.net_connect.send_command_timing('y') # Confirm
                     ### Save to atconfig
                     try:
                         self.net_connect.send_command_timing('copy run scp://' + scp_username + '@10.40.201.21//ilstu/config/dell/' + self.host + '.cfg')
@@ -94,9 +103,6 @@ class Switch_Driver:
             elif self.device_group == 'resnet-dist':
                 ### Turn off paging so no spacebar is needed
                 self.net_connect.send_command('terminal length 0')
-                ### Save locally
-                self.net_connect.send_command_timing('copy run start')
-                self.net_connect.send_command_expect('', expect_string = r'\#') ### Confirm
                 ### Save to atconfig
                 try:
                     self.net_connect.send_command_timing('copy run scp:')
@@ -111,11 +117,6 @@ class Switch_Driver:
 
             elif self.device_group == 'core':
                 self.net_connect.send_command('terminal length 0')
-                ### Lists of commands 
-                conf_list = ['exit','copy run start', '', ''] # Exit is to go to exec mode. Last 2 items are for enter key presses
-                ### Save locally
-                self.net_connect.send_config_set(conf_list)
-                self.net_connect.send_command_expect('', expect_string = r'\#')
                 ### Save to atconfig
                 try:
                     self.net_connect.send_command_timing('copy run scp:')
@@ -138,9 +139,6 @@ class Switch_Driver:
             elif self.device_group == 'vss':
                 ### Turn off paging so no spacebar is needed
                 self.net_connect.send_command('terminal length 0')
-                ### Save locally and remotely
-                self.net_connect.send_command_timing('copy run start')
-                self.net_connect.send_command_expect('', expect_string = r'\#')
                 try:
                     self.net_connect.send_command_timing('copy run scp:')
                     self.net_connect.send_command_timing('10.40.201.21')
@@ -155,10 +153,6 @@ class Switch_Driver:
                 if self.device_os == 'ios':
                     ### Turn off paging so no spacebar is needed
                     self.net_connect.send_command('terminal length 0')
-                    ### Save locally
-                    self.net_connect.send_command_timing('copy run start')
-                    self.net_connect.send_command_timing('') # Confirm
-                    self.net_connect.send_command_expect('', expect_string = r'\#') # Confirm again
                     ### Save to atconfig
                     self.net_connect.send_command_timing('copy run scp:')
                     self.net_connect.send_command_timing('10.40.201.21')
@@ -174,10 +168,6 @@ class Switch_Driver:
                 if self.device_os == 'ios':
                     ### Turn off paging so no spacebar is needed
                     self.net_connect.send_command('terminal length 0')
-                    ### Save locally
-                    self.net_connect.send_command_timing('copy run start')
-                    self.net_connect.send_command_timing('') # Confirm
-                    self.net_connect.send_command_expect('', expect_string = r'\#') # Confirm again
                     ### Save to atconfig
                     self.net_connect.send_command_timing('copy run scp:')
                     self.net_connect.send_command_timing('10.40.201.21')
@@ -186,162 +176,34 @@ class Switch_Driver:
                         self.net_connect.send_command_expect('/ilstu/config/cisco/rtr/' + self.host + '.cfg', expect_string = r'Password:')
                         self.net_connect.send_command_timing(scp_password)
                         print(self.host, 'backup is complete')
-                    except:
-                        print('**********', self.host, 'could not back up to atconfig')
-        except:
-            print('**********', self.host, 'was not able to run')
+                    except Exception as ex:
+                        print('**********', self.host, 'could not back up to atconfig', ex)
+        except Exception as ex:
+            print('**********', self.host, 'was not able to run', ex)
 
-        return
+        return self.host + 'has saved locally'
 
     '''
     Save running-config locally and to atconfig
     @args username: username used to log into atconfig
     @args password: password associated with username
+    @return: str
     '''
     def save_and_backup(self, username, password):
         scp_username = username
         scp_password = password
         try:
-            if ('access' or 'cirbn') in self.device_group:
-                if self.device_os == 'ios':
-                    ### Turn off paging so no spacebar is needed
-                    self.net_connect.send_command('terminal length 0')
-                    ### Save locally
-                    self.net_connect.send_command_timing('copy run start')
-                    self.net_connect.send_command_timing('') # Confirm
-                    self.net_connect.send_command_expect('', expect_string = r'\#') # Confirm again
-                    ### Save to atconfig
-                    self.net_connect.send_command_timing('copy run scp:')
-                    self.net_connect.send_command_timing('10.40.201.21')
-                    self.net_connect.send_command_timing(scp_username)
-                    try:
-                        self.net_connect.send_command_expect('/ilstu/config/cisco/rtr/' + self.host + '.cfg', expect_string = r'Password:')
-                        self.net_connect.send_command_timing(scp_password)
-                        self.net_connect.send_command_expect('', expect_string = r'\#')
-                        print(self.host, 'backup is complete')
-                    except:
-                        print('**********', self.host, 'could not back up to atconfig')
-                
-                elif self.device_os == 'dell':
-                    ### Turn off paging so no spacebar is needed
-                    self.net_connect.send_command('terminal length 0')
-                    ### Save locally
-                    self.net_connect.send_command_timing('copy run start')
-                    self.net_connect.send_command_timing('y') # Confirm
-                    ### Save to atconfig
-                    try:
-                        self.net_connect.send_command_timing('copy run scp://' + scp_username + '@10.40.201.21//ilstu/config/dell/' + self.host + '.cfg')
-                        self.net_connect.send_command_timing(scp_password)
-                        self.net_connect.send_command('y')
-                        print(self.host, 'backup is complete')
-                    except:
-                        print('**********', self.host, 'could not back up to atconfig')
+            self.save()
+            self.backup(scp_username, scp_password)
+        except Exception as ex:
+            print('**********', self.host, 'was not able to run', ex)
 
-            elif self.device_group == 'resnet-dist':
-                ### Turn off paging so no spacebar is needed
-                self.net_connect.send_command('terminal length 0')
-                ### Save locally
-                self.net_connect.send_command_timing('copy run start')
-                self.net_connect.send_command_expect('', expect_string = r'\#') ### Confirm
-                ### Save to atconfig
-                try:
-                    self.net_connect.send_command_timing('copy run scp:')
-                    self.net_connect.send_command_timing('10.40.201.21')
-                    self.net_connect.send_command_timing(scp_username)
-                    self.net_connect.send_command_expect('/ilstu/config/cisco/rtr/' + self.host + '.cfg', expect_string = r'Password:')
-                    self.net_connect.send_command_timing(scp_password)
-                    self.net_connect.send_command_expect('', expect_string = r'\#')
-                    print(self.host, 'backup is complete')
-                except:
-                    print('**********', self.host, 'could not back up to atconfig')
-
-            elif self.device_group == 'core':
-                self.net_connect.send_command('terminal length 0')
-                ### Lists of commands 
-                conf_list = ['exit','copy run start', '', ''] # Exit is to go to exec mode. Last 2 items are for enter key presses
-                ### Save locally
-                self.net_connect.send_config_set(conf_list)
-                self.net_connect.send_command_expect('', expect_string = r'\#')
-                ### Save to atconfig
-                try:
-                    self.net_connect.send_command_timing('copy run scp:')
-                    self.net_connect.send_command_timing('/ilstu/config/cisco/rtr/' + self.host + '.cfg')
-                    self.net_connect.send_command_timing('default')
-                    self.net_connect.send_command_timing('10.40.201.21')
-                    output = self.net_connect.send_command_expect(scp_username, expect_string = r'(password:|yes/no)') # Waiting for either the password of add RSA key prompt
-                    if 'password' in output: # If password prompt
-                        self.net_connect.send_command_timing(scp_password)
-                        self.net_connect.send_command_expect('', expect_string = r'\#')
-                        print(self.host, 'backup is complete')
-                    else: # If RSA key prompt
-                        self.net_connect.send_command_timing('yes')
-                        self.net_connect.send_command_timing(scp_password)
-                        self.net_connect.send_command_expect('', expect_string = r'\#')
-                        print(self.host, 'backup is complete')	
-                except:
-                    print('**********', self.host, 'could not back up to atconfig')
-
-            elif self.device_group == 'vss':
-                ### Turn off paging so no spacebar is needed
-                self.net_connect.send_command('terminal length 0')
-                ### Save locally and remotely
-                self.net_connect.send_command_timing('copy run start')
-                self.net_connect.send_command_expect('', expect_string = r'\#')
-                try:
-                    self.net_connect.send_command_timing('copy run scp:')
-                    self.net_connect.send_command_timing('10.40.201.21')
-                    self.net_connect.send_command_timing(scp_username)
-                    self.net_connect.send_command_expect('/ilstu/config/cisco/rtr/' + self.host + '.cfg', expect_string = r'Password:') # Waiting for the password prompt
-                    self.net_connect.send_command_timing(scp_password)
-                    self.net_connect.send_command_expect('', expect_string = r'\#')
-                    print(self.host, 'backup is complete')
-                except:
-                    print('**********', self.host, 'could not back up to atconfig')
-            elif self.device_group == 'gw':
-                if self.device_os == 'ios':
-                    ### Turn off paging so no spacebar is needed
-                    self.net_connect.send_command('terminal length 0')
-                    ### Save locally
-                    self.net_connect.send_command_timing('copy run start')
-                    self.net_connect.send_command_timing('') # Confirm
-                    self.net_connect.send_command_expect('', expect_string = r'\#') # Confirm again
-                    ### Save to atconfig
-                    self.net_connect.send_command_timing('copy run scp:')
-                    self.net_connect.send_command_timing('10.40.201.21')
-                    self.net_connect.send_command_timing(scp_username)
-                    try:
-                        self.net_connect.send_command_expect('/ilstu/config/cisco/rtr/' + self.host + '.cfg', expect_string = r'Password:')
-                        self.net_connect.send_command_timing(scp_password)
-                        print(self.host, 'backup is complete')
-                    except:
-                        print('**********', self.host, 'could not back up to atconfig')
-
-            elif self.device_group == 'voice-gw':
-                if self.device_os == 'ios':
-                    ### Turn off paging so no spacebar is needed
-                    self.net_connect.send_command('terminal length 0')
-                    ### Save locally
-                    self.net_connect.send_command_timing('copy run start')
-                    self.net_connect.send_command_timing('') # Confirm
-                    self.net_connect.send_command_expect('', expect_string = r'\#') # Confirm again
-                    ### Save to atconfig
-                    self.net_connect.send_command_timing('copy run scp:')
-                    self.net_connect.send_command_timing('10.40.201.21')
-                    self.net_connect.send_command_timing(scp_username)
-                    try:
-                        self.net_connect.send_command_expect('/ilstu/config/cisco/rtr/' + self.host + '.cfg', expect_string = r'Password:')
-                        self.net_connect.send_command_timing(scp_password)
-                        print(self.host, 'backup is complete')
-                    except:
-                        print('**********', self.host, 'could not back up to atconfig')
-        except:
-            print('**********', self.host, 'was not able to run')
-
-        return
+        return self.host + 'has saved locally and to atconfig'
 
     '''
     Find CDP neighbors on the device. Returns a list of dictionaries with Device ID and local port
     @args file: name of a file for the output to be written. This is will overwrite an existing file of the same name. File type is CSV.
+    @return: list
     '''
     def get_cdp_neighbors(self, file = None):
         if self.device_os == 'ios':
@@ -401,6 +263,7 @@ class Switch_Driver:
     @args full: When true, returns a list of dictionaries with port number, description, VLAN, duplex, speed, and media type
     @args vlan: Returns only connected ports on a specified VLAN. Can only be used when full = True
     @args file: name of a file for the output to be written. This is will overwrite an existing file of the same name. File type is CSV.
+    @return: list
     '''
     def get_connected_ports(self, full = False, vlan = None, file = None):
         if full == True:
@@ -480,6 +343,7 @@ class Switch_Driver:
 
     '''
     Find available ports. Command used 'show int status | include disabled'. Returns a list of disabled ports.
+    @return: list
     '''
     def get_open_ports(self):
         output_status = self.net_connect.send_command_timing('show int status | include disabled')
@@ -497,6 +361,7 @@ class Switch_Driver:
     @args full: When true, returns a list of dictionaries with port number, description, VLAN, duplex, speed, and media type
     @args vlan: Returns only enabled ports on a specified VLAN. Can only be used when full = True
     @args file: name of a file for the output to be written. This is will overwrite an existing file of the same name. File type is CSV.
+    @return: list
     '''
     def get_active_ports(self, full = False, vlan = None, file = None):
         if full == True:
@@ -580,18 +445,22 @@ class Switch_Driver:
     @args full: When true, returns a list of dictionaries with MAC address, port, and VLAN
     @args vlan: Returns only MAC addresses on a specified VLAN. Can only be used when full = True
     @args file: str name of a file for the output to be written. This is will overwrite an existing file of the same name. File type is CSV.
+    @return: list
     '''
     def get_mac_addresses(self, full = False, vlan = None, file = None):
+        mac_list = []
         if full == True:
             if vlan == None:
                 if 'access' in self.device_group and self.device_os == 'ios':
                     output = self.net_connect.send_command_timing('show mac address-table secure')
                     mac_output = output.splitlines()
                     mac_list = []
-                    for i in range(3, len(mac_output)):
+                    for i in range(3, len(mac_output)-1):
                         ### Saving to a str then list with split removes empty space items
                         temp_str = mac_output[i]
+                        print(temp_str)
                         temp_list = temp_str.split()
+                        print(temp_list)
                         mac_add = temp_list[1]
                         mac_port = temp_list[-1]
                         mac_vlan = temp_list[0]
@@ -722,6 +591,7 @@ class Switch_Driver:
     Returns an IP address for the given MAC address(es).
     @args mac_address: Accepted input is a single MAC address string or a list of MAC addresses of any length
     @args file: str name of a file for the output to be written. This is will overwrite an existing file of the same name. File type is CSV.
+    @return: str
     '''
     def get_ip_address(self, mac_address, file = None):
         ip_address = ''
@@ -803,6 +673,7 @@ class Switch_Driver:
     Returns the running-config of a given port(s). Command used is 'show run interface [port]'
     @args port: Accepted input is a single port string or a list of ports of any length. port needs to include speed type, not just the number
     @args file: str name of a file for the output to be written. This is formatted like a show run. This is will overwrite an existing file of the same name. File type is TXT.
+    @return: dict
     '''  
     def get_config_port(self, port, file = None):
         config_dict = {}
@@ -841,6 +712,7 @@ class Switch_Driver:
     @args state: Returns only ports that match the given state. Acceptable states are: all, admin_auto, admin_on, admin_off, oper_on, oper_off, and faulty. By default, it is set to all
     @args device: accepts any str and returns only the items that have the device string in Device ID
     @args file: name of a file for the output to be written. This will overwrite an existing file of the same name. File type is CSV.
+    @return: list
     '''
     def get_poe_ports(self, full = False, state = 'all', device = 'all', file = None):
         poe_list = []
@@ -1124,106 +996,114 @@ class Switch_Driver:
 
         return poe_list
 
-    #Gets the vitals on a switch - Use a single key or a list of keys to return multiple values. If field is left blank then it returns all values.
-    #Keys avalable to use - 'hostname,'serialNumber','model',"iosVer",'iosFile','lastReload',"configReg","powerSupplies",'powerVoltage','ModulesInUse','availableMod','remainingPoE'}
+    '''
+    Gets the vitals on a switch - Use a single key or a list of keys to return multiple values. If field is left blank then it returns all values.
+    Keys avalable to use: 'hostname, 'serial', 'model', 'ios_ver', 'ios_file', 'last_reload', 'config_reg', 'power_supplies', 'power_watts', 'mods_used', 'mods_avail', 'poe_avail'
+    @args key: a str or list for the values to be returned. If key is not specified, all values returned
+    @return: dict, str, or list
+    '''
     def get_vitals(self, key = 'None'):
         hostname = self.host
-        serialNumber = 'N/A'
+        serial = 'N/A'
         model = 'N/A'
-        iosVer = 'N/A'
-        iosFile = 'N/A'
-        lastReload = 'N/A'
-        configReg = 'N/A'
-        powerSupplies = 'N/A'
-        ModulesInUse = 'N/A'
-        availableMod = 'N/A' 
-        remainingPoE = 'N/A'
+        ios_ver = 'N/A'
+        ios_file = 'N/A'
+        last_reload = 'N/A'
+        config_reg = 'N/A'
+        power_watts = 'N/A'
+        power_supplies = 'N/A'
+        mods_used = 'N/A'
+        mods_avail = 'N/A' 
+        poe_avail = 'N/A'
 
-        #---get IoSversion---#
-        iosVer = self.net_connect.send_command_timing('sh ver | i Version')
-        iosVer = iosVer.split('Version')
-        iosVer = iosVer[1].split(',')
-        iosVer = iosVer[0]
-        print('ios')
-        #--get PowerSuppliesVolt--#
-        PowerVolt = self.net_connect.send_command_timing('sh power | i PWR')
-        PowerVolt = PowerVolt.splitlines()
-        PowerVolts = []
-        for line in PowerVolt:
-            PowerVolts.append(line.split()[3])
-        
-        print('power')
-        #---PowrSupplies---#
-        powerSupplies = self.net_connect.send_command_timing('sh run | i power red')
-        powerSupplies = powerSupplies.split()
-        powerSupplies = powerSupplies[-1]
+        ### Avoiding making several 'show version' calls by adding output modifiers for each field needed
+        output = self.net_connect.send_command_timing('show version | i Cisco IOS Software|System restarted|System image file is|processor \\(|processor with |Configuration register') ### 'processor with' is for 3650's
+        version_list = output.splitlines()
+        for i in range(len(version_list)):
+            if i == 0:
+                ### IOS Version
+                ios_ver = version_list[i].split('Version')
+                ios_ver = ios_ver[1].split(',')
+                ios_ver = ios_ver[0]
+            elif i == 1:
+                ### Last reload
+                last_reload = version_list[i]
+                last_reload = last_reload.split('at')
+                last_reload = last_reload[1]
+            elif i == 2:
+                ### IOS file
+                ios_file = version_list[i]
+                ios_file = ios_file.split()[-1]
+                ios_file = ios_file.strip('\"')
+            elif i == 3:
+                ### Get Model
+                model = version_list[i]
+                model = model.split(' ')[1] 
+            elif i == 4:
+                ### Config register
+                config_reg = version_list[i]
+                config_reg = config_reg.split()
+                config_reg = config_reg[-1]          
 
-        # config reg - sh ver | configuration register
-        #---configReg---#
-        configReg = self.net_connect.send_command_timing('sh ver | i Configuration register')
-        configReg = configReg.split()
-        configReg = configReg[-1]
-        print('config reg')
-        # iOS file - sh ver | i system image file is
-        #---get iOSfile---#
-        iosFile = self.net_connect.send_command_timing('sh ver | i System image file is')
-        iosFile = iosFile.split()[-1]
+        ### Get power supply wattage
+        power_watt = self.net_connect.send_command_timing('sh power | i PWR')
+        power_watt = power_watt.splitlines()
+        power_watts = []
+        for line in power_watt:
+            power_watts.append(line.split()[3])
 
-        # last reload - sh ver | system restarted at
-        #---Last Reload---#
-        lastReload = self.net_connect.send_command_timing('sh ver | i System restarted')
-        lastReload = lastReload.split('at')
-        lastReload = lastReload[1]
-        #---Gets remainingPoE----#
+        ### Power supplies
+        power_supplies = self.net_connect.send_command_expect('sh run | i power redun', expect_string = r'\#')
+        power_supplies = power_supplies.split()
+        power_supplies = power_supplies[-1]
+
+        ### PoE available
         try: 
             power_output = self.net_connect.send_command_timing('sh power in | i Remaining:') 
-            power =  power_output.split("  ") 
-            remainingPoE = str(power[2].split(":")[1]) 
+            power =  power_output.split('  ') 
+            poe_avail = str(power[2].split(':')[1]) 
         except: 
-            remainingPoE = "Non Poe" 
-
-    #---Gets model----#
-        Model_Get = self.net_connect.send_command('sh ver | i processor') 
-        model = Model_Get.split(' ')[1] 
-    #---Gets SN----#
+            poe_avail = 'Non Poe' 
+        
+        ### Get SN
         try: 
-            serialNumber = self.net_connect.send_command_expect('sh snmp chassis') 
+            serial = self.net_connect.send_command_expect('sh snmp chassis') 
         except: 
-            serialNumber = 'N/a' 
+            serial = 'N/a' 
 
-        #---Gets SlotAmount---#
+        ### Get number of slots
         SlotAmount = '0'
-        #Gives us how many slots and indirectly tells me if it is a 1u switch. 
-        if("4506" in model): 
+        ### Gives us how many slots and indirectly tells me if it is a 1u switch. 
+        if('4506' in model): 
             SlotAmount = 6 
-        elif("4503" in model): 
+        elif('4503' in model): 
             SlotAmount = 3 
-        elif("2960" in model): 
+        elif('2960' in model): 
             SlotAmount = 1 
-        elif("3560" in model): 
+        elif('3560' in model): 
             SlotAmount = 1 
-        elif("3650" in model): 
+        elif('3650' in model): 
             SlotAmount = 1 
-        elif("9410" in model or "C9410R" in Model_Get): 
-            model = "C9410R" 
+        elif('9410' in model or 'C9410R' in model): 
+            model = 'C9410R' 
             SlotAmount = 10 
         elif('for' in model): 
             try: 
-                Model_Get = self.net_connect.send_command('sh ver | i WS') 
-                model = Model_Get.split(' ')[1] 
+                model = self.net_connect.send_command('sh ver | i WS') 
+                model = model.split(' ')[1] 
                 SlotAmount = 1 
             except: 
                 pass 
             try: 
-                Model_Get = self.net_connect.send_command('sh ver | i cisco C') 
-                model = Model_Get.split(' ')[1] 
+                model = self.net_connect.send_command('sh ver | i cisco C') 
+                model = model.split(' ')[1] 
                 SlotAmount = 1 
             except: 
                 pass 
         else: 
             SlotAmount = 1 
 
-        #---List of mods---#
+        ### List of mods
         sh_mod_output = self.net_connect.send_command('sh mod') 
         sh_mod_output = sh_mod_output.split('\n') 
         mod_list = [] 
@@ -1231,9 +1111,9 @@ class Switch_Driver:
             while('--+' not in sh_mod_output[0]): 
                 del sh_mod_output[0] 
             del sh_mod_output[0] 
-            #list format [mod_num, port_num,serial_num,mod_model] 
+            ### List format [mod_num, port_num,serial_num,mod_model] 
             i = 0 
-            #we get an index out of bound error so this allows us to not crash our program. 
+            ### We get an index out of bound error so this allows us to not crash our program. 
             try: 
                 while('MAC address' not in sh_mod_output[i]): 
                     test = sh_mod_output[i].split()
@@ -1243,86 +1123,40 @@ class Switch_Driver:
             except: 
                 pass 
         else: 
-            #left to rigt 
-            #For 1u Switches 
-            if("2960" in model): 
+            ### Left to rigt 
+            ### For 1u Switches 
+            if('2960' in model): 
                 mod_list.append(['1','24/48','NA','1u']) 
-            elif("3560" in model): 
+            elif('3560' in model): 
                 mod_list.append(['1','8/12/24/48','NA','1u']) 
-            elif("3650" in model): 
+            elif('3650' in model): 
                 mod_list.append(['1','24/48','NA','1u']) 
             else: 
                 mod_list.append(['1','Unknown','NA','1u']) 
-        ModulesInUse = mod_list
+        mods_used = mod_list
 
-        #--avalible mods---#
-
-        availableMod = SlotAmount - len(mod_list)
-        #--Return Values--#
-        value = {'hostname': hostname,'serialNumber': serialNumber ,'model':model,"iosVer" : iosVer,'iosFile': iosFile,'lastReload':lastReload,"configReg":configReg,"powerSupplies":powerSupplies, 'powerVoltage': PowerVolts, 'ModulesInUse':ModulesInUse,'availableMod':availableMod,'remainingPoE':remainingPoE}
-        #return all if no key is used
+        ### Available mods
+        mods_avail = SlotAmount - len(mod_list)
+        ### Return values
+        value = {'hostname': hostname,'serial': serial , 'model':model, 'ios_ver':ios_ver, 'ios_file':ios_file, 'last_reload':last_reload, 'config_reg':config_reg,
+                 'power_supplies':power_supplies, 'power_wattage':power_watts, 'mods_used':mods_used, 'mods_avail':mods_avail, 'poe_avail':poe_avail}
+        ### Return all if no key is used
         if(key == 'None'):
             return value
-        #Return multiple values based on list
+        ## Return multiple values based on list
         elif(type(key) is list):
             valuesReturn = []
             for item in key:
                 valuesReturn.append(value[str(item)])
             return valuesReturn
-        #return the single key used.
+        ### Return the single key used.
         else:
             return value[str(key)]
 
     '''
     Deletes all archive config files that are over one month old. This will also look for config files that equal the hostname. 
     This function will use a 'dir all' to find all the config files
-    '''
-    def erase_old_configs(self):
-        month_list = ['Jan-', 'Feb-', 'Mar-', 'Apr-', 'May-', 'Jun-', 'Jul-', 'Aug-', 'Sep-', 'Oct-', 'Nov-', 'Dec-']
-        file_list = []
-        file_system = ''
-        output = self.net_connect.send_command_expect('dir all', expect_string = r'\#')
-        output = output.splitlines()
-        for i in range(len(output)):
-            ### Saving to a str then list with split removes empty space items
-            temp_str = output[i]
-            temp_list = temp_str.split()
-            if len(temp_list) > 0 and temp_list[0] == 'Directory':
-                file_system = temp_list[-1]
-                continue
-            ### Config files are in lines with 9 items
-            if len(temp_list) == 9:
-                for j in range(len(month_list)):
-                    ### Check to see if the date string is in the filepath
-                    if month_list[j] in temp_list[-1]:
-                        filepath = file_system + temp_list[-1]
-                        ### Determine if file is older than 30 days
-                        month = temp_list[3]
-                        ### Convert month str into an int
-                        for k in range(len(month_list)):
-                            if month in month_list[k]:
-                                month = k + 1
-                                break
-                        day = int(temp_list[4])
-                        year = int(temp_list[5])
-                        file_date = datetime.date(year, month, day)
-                        today = datetime.date.today()
-                        time_diff = today - file_date
-                        time_list = str(time_diff).split()
-                        try:
-                            time_diff = int(time_list[0])
-                            if time_diff > 30:
-                                file_list.append(filepath)
-                                break
-                        except:
-                            pass
-                    elif temp_list[-1].lower() == self.host.lower() + '.cfg':
-                        filepath = file_system + temp_list[-1]
-                        file_list.append(filepath)
-                        break
-
-    '''
-    Deletes all config files that are over one month old. This function will find all config files
+    @return: str
     '''
     def erase_old_configs(self):
         month_list = ['Jan-', 'Feb-', 'Mar-', 'Apr-', 'May-', 'Jun-', 'Jul-', 'Aug-', 'Sep-', 'Oct-', 'Nov-', 'Dec-']
@@ -1378,6 +1212,7 @@ class Switch_Driver:
     '''
     Finds any ports in err-disabled state. Returns a list of dictionaries.
     @args file: str name of a file for the output to be written. This is will overwrite an existing file of the same name. File type is CSV. Only the switches with err-disabled ports will be written
+    @return: list or str
     '''
     def get_errdisabled(self, file = None):
         if (self.device_os == 'ios' or self.device_group == 'nx-os') and 'dc' not in self.device_group:
@@ -1417,6 +1252,7 @@ class Switch_Driver:
     @args num_pings: The number of times to ping the IP address. Default is 5. Number of pings must be 1-2147483647
     @args size: The size of the packets in bytes. Default is 100. Size must be 36-18024
     @args details: Returns a dictionary containing the IP, ping percentage, successful pings, total pings, packet size, and minimum, average, and maximum return times
+    @return: list
     '''
     def ping(self, ip, num_pings = 5, size = 100):
         ping_list = []
@@ -1472,12 +1308,13 @@ class Switch_Driver:
                             temp_dict['maximum'] = 'N/A'
                             ping_list.append(temp_dict)
                             break
-        
+
         return ping_list
 
     '''
     Returns a boolean value of the ping status of a given IP address(es). Values are returned as a list of dictionaries. This uses a 3-ping test.
     @args ip: Can be a str for an single IP or a list for any number of IP's.
+    @return: list
     '''
     def is_pingable(self, ip):
         pingable_list = []
@@ -1518,7 +1355,9 @@ class Switch_Driver:
         return pingable_list
 
     '''
-    Returns a dictionary of lists of uplinks with input errors
+    Returns a list of dictionaries of uplinks with input errors
+    @args file: str name of a file for the output to be written. This is will overwrite an existing file of the same name. File type is CSV. Only the switches errors on the uplinks will be written.
+    @return: list
     '''
     def monitor_uplinks(self, file = None):
         error_list = []
@@ -1599,4 +1438,8 @@ class Switch_Driver:
                         file.write(error_list[i]['host'] + ',' + error_list[i]['port'] + ',' + error_list[i]['description'] + ',' + error_list[i]['errors'])
 
         return error_list
-
+    
+    def jsonFormat(self, data):
+        with open(Path("DriversTesting.txt"), "w") as fileout:
+            outdata = json.dumps(data, indent=4)
+            fileout.write(outdata)
